@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leafstone — Full Demo</title>
+<style>
+:root{--accent:#0f766e;--muted:#6b7280;--bg:#f8fafc}
+*{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+body{margin:0;background:var(--bg);color:#0f172a}
+header{background:white;box-shadow:0 1px 3px rgba(2,6,23,.06);position:sticky;top:0;z-index:50}
+.container{max-width:1100px;margin:0 auto;padding:16px}
+.nav{display:flex;gap:12px;align-items:center}
+.brand{font-weight:700;color:var(--accent);font-size:20px}
+.search{flex:1}
+input,button,select,textarea{font-family:inherit}
+input[type=text],input[type=number],input[type=password],select{padding:10px;border:1px solid #e6eef2;border-radius:8px;width:100%}
+button{background:var(--accent);color:white;border:0;padding:10px 12px;border-radius:8px;cursor:pointer}
+.grid{display:grid;gap:12px}
+.hero{background:linear-gradient(90deg,#ecfeff,white);padding:20px;border-radius:10px}
+.card{background:white;border-radius:10px;padding:12px;box-shadow:0 1px 2px rgba(2,6,23,.04)}
+.product-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.product img{width:100%;height:160px;object-fit:cover;border-radius:6px;position:relative}
+.small{font-size:13px;color:var(--muted)}
+.muted{color:var(--muted)}
+.flex{display:flex;gap:8px;align-items:center}
+footer{padding:20px;text-align:center;color:var(--muted);font-size:14px}
+@media(min-width:900px){.container{padding:24px}}
+.btn-ghost{background:transparent;color:var(--accent);border:1px solid rgba(15,118,110,.12)}
+.pill{padding:6px 8px;border-radius:999px;border:1px solid #e6eef2;display:inline-block}
+.topbar-actions{display:flex;gap:8px}
+.modal{position:fixed;inset:0;background:rgba(3,7,18,.4);display:flex;align-items:center;justify-content:center;padding:20px;z-index:100}
+.modal>.card{width:100%;max-width:760px;position:relative}
+.closeX{position:absolute;top:8px;right:12px;font-weight:bold;cursor:pointer;font-size:18px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="container nav">
+    <div class="brand">Leafstone</div>
+    <div class="search">
+      <input id="globalSearch" type="text" placeholder="Search products, categories, brands...">
+    </div>
+    <div class="topbar-actions">
+      <button id="btnCategories" class="btn-ghost">Categories</button>
+      <button id="btnAdmin" class="btn-ghost">Admin</button>
+      <button id="btnProfile" class="btn-ghost">Profile</button>
+      <button id="btnCart" class="pill">Cart (<span id="cartCount">0</span>)</button>
+    </div>
+  </div>
+</header>
+<main class="container" id="app"></main>
+<footer>Leafstone demo — front-end only. Replace data & images in the HTML to customize. © Leafstone</footer>
+<div id="modals"></div>
+
+<script>
+// --- Sample Products ---
+const SAMPLE_PRODUCTS = (() => {
+  const cats=['Mobiles','Electronics','Fashion','Home','Books','Toys','Beauty'];
+  const imgs=['https://picsum.photos/seed/p1/800/600','https://picsum.photos/seed/p2/800/600','https://picsum.photos/seed/p3/800/600','https://picsum.photos/seed/p4/800/600','https://picsum.photos/seed/p5/800/600','https://picsum.photos/seed/p6/800/600'];
+  let list=[];
+  for(let i=1;i<=50;i++){
+    const category=cats[i%cats.length];
+    list.push({id:'P'+(1000+i),title:`${category} Product ${i}`,price:Math.round((50+Math.random()*950)*100)/100,rating:Math.round((3+Math.random()*2)*10)/10,stock:Math.floor(Math.random()*30),category,images:[imgs[i%imgs.length]],desc:`This is a concise description for ${category} Product ${i}.`});
+  }
+  return list;
+})();
+
+// --- LocalStorage helpers ---
+function lsGet(k,f){try{const v=localStorage.getItem(k);return v?JSON.parse(v):f}catch(e){return f}}
+function lsSet(k,v){localStorage.setItem(k,JSON.stringify(v))}
+
+// --- Initialize ---
+if(!lsGet('leaf_products')) lsSet('leaf_products', SAMPLE_PRODUCTS);
+// Initialize default admin only if not present
+if(!lsGet('leaf_users')) {
+  lsSet('leaf_users', [
+    {
+      email: 'admin@leafstone.test',
+      password: 'admin123',
+      name: 'Admin',
+      mobile: '1234567890',
+      isAdmin: true,
+      hidden: true  // mark admin as hidden
+    }
+  ]);
+}
+
+if(!lsGet('leaf_orders')) lsSet('leaf_orders',[]);
+
+const state = {
+  products: lsGet('leaf_products', SAMPLE_PRODUCTS),
+  users: lsGet('leaf_users', []),
+  orders: lsGet('leaf_orders', []),
+  currentUser: null, // force no user at start
+  cart: lsGet('leaf_cart', []),
+  view:{page:'home',params:{}}
+};
+
+function saveAll(){lsSet('leaf_products',state.products); lsSet('leaf_users',state.users); lsSet('leaf_orders',state.orders); lsSet('leaf_cart',state.cart); lsSet('leaf_session',state.currentUser);}
+
+// --- Element helper ---
+function el(tag,attrs={},children=[]){const e=document.createElement(tag);for(const k in attrs){if(k.startsWith('on')) e.addEventListener(k.substring(2),attrs[k]);else if(k==='html') e.innerHTML=attrs[k];else e.setAttribute(k,attrs[k]);} (Array.isArray(children)?children:[children]).forEach(c=>{if(typeof c==='string') e.appendChild(document.createTextNode(c));else if(c)e.appendChild(c)});return e}
+
+// --- App ---
+const app=document.getElementById('app'), modals=document.getElementById('modals');
+state.currentUser = null; // force no one logged in
+lsSet('leaf_session', null); // clear saved session
+
+
+function render(){
+  document.getElementById('cartCount').textContent=state.cart.reduce((s,i)=>s+i.qty,0);
+  app.innerHTML='';
+  
+  if(state.view.page==='home') renderHome();
+  else if(state.view.page==='products') renderProducts();
+  else if(state.view.page==='product') renderProductDetail(state.view.params.id);
+  else if(state.view.page==='cart') renderCart();
+  else if(state.view.page==='checkout') renderCheckout();
+  else if(state.view.page==='profile') renderProfile();
+  else if(state.view.page==='admin') renderAdmin();
+}
+
+// --- Home ---
+function renderHome(){
+  const hero=el('div',{class:'hero card grid'},[
+    el('div',{html:'<h2>Welcome to Leafstone</h2><p class="small">A demo e-commerce site. Browse products, add to cart, and try the admin panel.</p>'}),
+    el('div',{class:'flex'},[el('button',{onclick:()=>{state.view.page='products'; state.view.params={}; render()}},'Shop Now')])
+  ]);
+  const cats=[...new Set(state.products.map(p=>p.category))];
+  const categories=el('div',{class:'grid', style:'grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-top:12px'}, cats.map(c=>el('div',{class:'card',onclick:()=>{state.view.page='products'; state.view.params={category:c}; render()}}, [el('div',{class:'small'},c), el('div',{html:'&nbsp;'})])));
+  const featured=state.products.slice(0,8).map(p=>productCard(p));
+  const featuredGrid=el('div',{class:'grid product-grid'},featured);
+  app.appendChild(hero); app.appendChild(el('div',{style:'height:12px'}));
+  app.appendChild(el('div',{class:'card'},[el('h3',{},'Categories'),categories]));
+  app.appendChild(el('div',{style:'height:12px'}));
+  app.appendChild(el('div',{class:'card'},[el('h3',{},'Featured Products'),featuredGrid]));
+}
+
+// --- Product Card ---
+// --- Pending Buy state ---
+state.pendingBuy = null;
+
+// --- Product Card ---
+function productCard(p){
+  const c = el('div',{class:'card product'},[
+    el('img',{
+      src:p.images[0],
+      alt:p.title,
+      onerror:(e)=>e.target.src='https://via.placeholder.com/400x300?text=Leafstone'
+    }),
+    el('div',{class:'small'},p.category),
+    el('div',{},el('strong',{},p.title)),
+    el('div',{class:'flex'},[
+      el('div',{},'₹'+p.price.toFixed(2)),
+      el('div',{class:'small muted'},p.rating+' ★')
+    ]),
+    el('div',{class:'flex'},[
+      // View button
+      el('button',{
+        onclick:()=>{ 
+          state.view.page='product'; 
+          state.view.params={id:p.id}; 
+          render(); 
+        }
+      },'View'),
+      // Add button
+      el('button',{
+        class:'btn-ghost',
+        onclick:()=>{ addToCart(p.id,1); }
+      },'Add')
+    ])
+  ]);
+  return c;
+}
+
+// --- Product Detail ---
+function renderProductDetail(id){
+  const p = state.products.find(x => x.id === id);
+  if(!p){
+    alert('Product not found');
+    state.view.page='products';
+    render();
+    return;
+  }
+
+  app.innerHTML = ''; // clear previous content
+
+  const gallery = el('div', {}, p.images.map(src => el('img',{
+    src, 
+    style:'width:100%;height:240px;object-fit:cover;border-radius:8px'
+  })));
+
+  const details = el('div', {}, [
+    el('h2', {}, p.title),
+    el('div', {class:'small'}, p.category + ' • ' + p.rating + ' ★'),
+    el('p', {class:'small'}, p.desc),
+    el('div', {}, 'Price: ₹' + p.price.toFixed(2)),
+    el('div', {style:'height:8px'}),
+    el('div', {class:'flex', style:'gap:8px'}, [
+      // Add to cart
+      el('button',{onclick:()=>addToCart(p.id,1)},'Add to Cart'),
+      // Buy Now
+      el('button',{onclick:()=>{
+        if(!state.currentUser){
+          state.pendingBuy = {id:p.id, qty:1};
+          state.view.page='profile';
+          render();
+          return;
+        }
+        state.cart = [{id:p.id, qty:1}];
+        showPaymentOptions();
+      }, style:'background:#f59e0b;color:white;'},'Buy Now'),
+      // Back button
+      el('button',{class:'btn-ghost', onclick:()=>{state.view.page='products'; render();}},'Back')
+    ])
+  ]);
+
+  app.appendChild(el('div',{class:'grid', style:'grid-template-columns:1fr 360px;gap:12px'}, [gallery, details]));
+}
+
+// --- Profile ---
+function saveProfile(){
+  const name=document.getElementById('profile_name').value.trim();
+  const mobile=document.getElementById('profile_mobile').value.trim();
+  const addr=document.getElementById('profile_addr').value.trim();
+  const pincode=document.getElementById('profile_pincode').value.trim();
+
+  if(!name||!mobile||!addr||!pincode) return alert('Fill all fields');
+
+  const user = { name, mobile, addr, pincode, email:'guest@leafstone.test', isAdmin:false };
+  state.currentUser = user;
+
+  const existingUsers = lsGet('leaf_users', []).filter(u => !u.isAdmin);
+
+
+  const idx = existingUsers.findIndex(u=>u.email===user.email);
+  if(idx>=0) existingUsers[idx]=user;
+  else existingUsers.push(user);
+
+  lsSet('leaf_users', existingUsers);
+  lsSet('leaf_session', user);
+
+  showToast('Profile saved');
+
+  // Redirect to the pending product if exists
+  if(state.pendingProduct){
+    state.view.page='product';
+    state.view.params={id: state.pendingProduct};
+    state.pendingProduct = null;
+  } else {
+    state.view.page='products';
+    state.view.params={};
+  }
+  render();
+}
+// --- Payment modal ---
+function showPaymentOptions(){
+  if(!state.cart || state.cart.length===0) return alert('Cart is empty');
+
+  let selectedPayment = ''; // store chosen payment
+
+  const btnStyle = 'flex:1;padding:10px;border-radius:6px;border:1px solid #e6eef2;cursor:pointer;transition:all 0.2s;background:white;color:black;';
+  const hoverStyle = 'transform:scale(1.03);opacity:0.9;';
+
+  const codBtn = el('button',{
+    onmouseover:(e)=>e.target.style.cssText+=hoverStyle,
+    onmouseout:(e)=>e.target.style.cssText=btnStyle + (selectedPayment==='COD'?'background:yellow;':''),
+    onclick:()=>{ 
+      selectedPayment='COD'; 
+      codBtn.style.background='yellow';
+      onlineBtn.style.background='white';
+      confirmBtn.disabled = false;
+    }, 
+    style: btnStyle
+  }, 'Cash on Delivery');
+
+  const onlineBtn = el('button',{
+    onmouseover:(e)=>e.target.style.cssText+=hoverStyle,
+    onmouseout:(e)=>e.target.style.cssText=btnStyle + (selectedPayment==='Online'?'background:yellow;':''),
+    onclick:()=>{ 
+      selectedPayment='Online'; 
+      onlineBtn.style.background='yellow';
+      codBtn.style.background='white';
+      confirmBtn.disabled = false;
+    }, 
+    style: btnStyle
+  }, 'Online Payment');
+
+  const confirmBtn = el('button',{
+    onclick:()=>{
+      if(!selectedPayment) return alert('Select a payment option first!');
+      state.paymentMethod = selectedPayment;
+      hideModals();
+      completeOrder();
+    },
+    disabled:true,
+    style:'margin-top:12px;padding:10px;border-radius:6px;background:#0f766e;color:white;border:none;cursor:pointer;width:100%;'
+  }, 'Confirm');
+
+  const m = el('div',{class:'modal'}, el('div',{class:'card'}, [
+    el('span',{class:'closeX', onclick:hideModals},'×'),
+    el('h3',{},'Select Payment Option'),
+    el('div',{style:'display:flex;gap:12px;margin-top:12px'}, [codBtn, onlineBtn]),
+    el('div',{style:'margin-top:12px'}, confirmBtn)
+  ]));
+
+  modals.innerHTML=''; 
+  modals.appendChild(m);
+}
+
+
+
+
+// --- Cart ---
+function addToCart(id,qty){
+  const p=state.products.find(x=>x.id===id); if(!p) return alert('Product not found');
+  const item=state.cart.find(i=>i.id===id);
+  if(item) item.qty+=qty; else state.cart.push({id,qty});
+  saveAll(); render(); showToast('Added to cart');
+}
+function updateCartItem(id,qty){state.cart=state.cart.map(i=>i.id===id?{...i,qty}:i).filter(i=>i.qty>0); saveAll(); render();}
+function removeCartItem(id){state.cart=state.cart.filter(i=>i.id!==id); saveAll(); render();}
+
+function renderCart(){
+  const rows=state.cart.map(ci=>{
+    const p=state.products.find(x=>x.id===ci.id);
+    return el('div',{class:'card flex',style:'justify-content:space-between;align-items:center'},[
+      el('div',{style:'display:flex;gap:12px;align-items:center'},[el('img',{src:p.images[0],style:'width:80px;height:60px;object-fit:cover;border-radius:6px'}), el('div',{},[el('div',{},p.title), el('div',{class:'small muted'}, '₹'+p.price.toFixed(2))])]),
+      el('div',{},[el('input',{type:'number',value:ci.qty,min:1,style:'width:64px',onchange:(e)=>{updateCartItem(ci.id,Number(e.target.value))}}),el('button',{class:'btn-ghost',onclick:()=>removeCartItem(ci.id)},'Remove')])
+    ]);
+  });
+  app.appendChild(el('h2',{},'Your Cart'));
+  if(rows.length===0) app.appendChild(el('div',{class:'card'},'Cart is empty.'));
+  else {
+    rows.forEach(r=>app.appendChild(r));
+    const total=state.cart.reduce((s,i)=>{const p=state.products.find(p=>p.id===i.id); return s+(p?p.price*i.qty:0)},0);
+    app.appendChild(el('div',{class:'card',style:'text-align:right'},[el('div',{},'Total: ₹'+total.toFixed(2)), el('div',{},el('button',{onclick:()=>{state.view.page='checkout'; render();}},'Proceed to Checkout'))]));
+  }
+}
+
+// --- Profile ---
+function renderProfile(){
+  const user = state.currentUser || { name:'', mobile:'', addr:'', pincode:'', email:'', isAdmin:false };
+
+  const profileForm = el('div', { class: 'card', style:'position:relative;' }, [
+    el('span', { 
+      class:'closeX', 
+      onclick:()=>{state.view.page='home'; render();}, 
+      style:'position:absolute;top:8px;right:12px;font-weight:bold;font-size:18px;color:#6b7280;cursor:pointer;'
+    }, '×'),
+    
+    el('h2', {}, 'Your Profile / Create Account'),
+    el('input', { id:'profile_name', type:'text', placeholder:'Full Name', value:user.name || '', style:'width:100%;margin-bottom:6px'}),
+    el('input', { id:'profile_mobile', type:'text', placeholder:'Mobile', value:user.mobile || '', style:'width:100%;margin-bottom:6px'}),
+    el('input', { id:'profile_addr', type:'text', placeholder:'Address', value:user.addr || '', style:'width:100%;margin-bottom:6px'}),
+    el('input', { id:'profile_pincode', type:'text', placeholder:'Pincode', value:user.pincode || '', style:'width:100%;margin-bottom:6px'}),
+    el('input', { id:'profile_email', type:'text', placeholder:'Email', value:user.email || '', style:'width:100%;margin-bottom:6px', disabled:user.isAdmin}), // admins cannot change
+    el('div', {}, `Role: ${user.isAdmin ? 'Admin' : 'User'}`),
+    el('button', { onclick: saveProfile }, 'Save Profile')
+  ]);
+
+  app.innerHTML='';
+  app.appendChild(profileForm);
+}
+
+
+
+
+
+
+
+function saveProfile(){
+  const name = document.getElementById('profile_name').value.trim();
+  const mobile = document.getElementById('profile_mobile').value.trim();
+  const addr = document.getElementById('profile_addr').value.trim();
+  const pincode = document.getElementById('profile_pincode').value.trim();
+
+  if(!name || !mobile || !addr || !pincode) return alert('Fill all fields');
+
+  const user = { 
+  name, 
+  mobile, 
+  addr, 
+  pincode, 
+  email: '',     // no fake email
+  isAdmin: false 
+};
+ // never admin
+  state.currentUser = user;
+
+  const existingUsers = lsGet('leaf_users', []);
+  const idx = existingUsers.findIndex(u => u.email === user.email);
+  if(idx >= 0) existingUsers[idx] = user;
+  else existingUsers.push(user);
+
+  lsSet('leaf_users', existingUsers);
+  lsSet('leaf_session', user);
+  
+
+showToast('Profile saved');
+if(state.pendingBuy){
+  const {id, qty} = state.pendingBuy;
+  state.cart = [{id, qty}];
+  state.pendingBuy = null;
+  showPaymentOptions(); // open payment modal automatically
+} else {
+  state.view.page='home';
+  render();
+}
+
+
+
+}
+
+
+
+// --- Checkout ---
+function renderCheckout(){
+  const user = state.currentUser;
+  if(!user) return alert('Please create profile first!');
+
+  const checkoutCard = el('div',{class:'card', style:'max-width:400px;margin:20px auto;padding:20px;position:relative;'},[
+    // Close X button
+    el('span',{class:'closeX', onclick:()=>{state.view.page='home'; render();}, style:'position:absolute;top:10px;right:12px;cursor:pointer;font-size:18px;color:var(--muted);'},'×'),
+
+    el('h2',{},'Checkout'),
+    
+    ...state.cart.map(ci=>{
+      const p = state.products.find(x=>x.id===ci.id);
+      return el('div',{class:'card flex', style:'justify-content:space-between;align-items:center;margin-bottom:6px;padding:6px;'},[
+        el('div',{},p.title),
+        el('div',{},ci.qty+' × ₹'+p.price.toFixed(2))
+        
+      ]);
+      
+    }),
+
+    el('div',{style:'margin-top:8px;font-weight:bold'},'Total: ₹'+state.cart.reduce((s,i)=>{
+      const p = state.products.find(p=>p.id===i.id);
+      return s + (p ? p.price*i.qty : 0);
+    },0)),
+
+    el('div',{style:'margin-top:12px'},[
+      el('div',{},'Select Payment Method:'),
+      el('label', {class:'flex', style:'gap:6px;align-items:center'}, [
+        el('input',{type:'radio',name:'payment',value:'COD',onclick:(e)=>state.paymentMethod=e.target.value}),
+        'Cash on Delivery'
+      ]),
+      el('label', {class:'flex', style:'gap:6px;align-items:center'}, [
+        el('input',{type:'radio',name:'payment',value:'Online',onclick:(e)=>state.paymentMethod=e.target.value}),
+        'Online Payment'
+      ])
+      
+    ]),
+
+    el('button',{style:'margin-top:12px;background:#0f766e;color:white',onclick:completeOrder},'Confirm Order')
+  ]);
+
+  app.innerHTML=''; 
+  app.appendChild(checkoutCard);
+}
+
+//hgjg
+// --- Header buttons ---
+document.getElementById('btnAdmin').addEventListener('click', () => {
+  renderAdminLogin(); // always show login modal first
+});
+
+// --- Admin Login Modal ---
+function renderAdminLogin(){
+  const modalContent = el('div',{class:'modal'},el('div',{class:'card', style:'max-width:400px;padding:20px;'},[
+    el('span',{class:'closeX',onclick:hideModals},'×'),
+    el('h2',{},'Admin Login'),
+    el('input',{id:'admin_email',type:'text',placeholder:'Email',style:'width:100%;margin-bottom:8px;padding:8px;border:1px solid #ccc;border-radius:6px;'}),
+    el('input',{id:'admin_password',type:'password',placeholder:'Password',style:'width:100%;margin-bottom:12px;padding:8px;border:1px solid #ccc;border-radius:6px;'}),
+    el('button',{onclick:adminLogin, style:'width:100%;padding:10px;background:#0f766e;color:white;border:none;border-radius:6px;cursor:pointer;'},'Login')
+  ]));
+  modals.innerHTML=''; 
+  modals.appendChild(modalContent);
+}
+
+//admin login
+function adminLogin(){
+  const email = document.getElementById('admin_email').value.trim();
+  const password = document.getElementById('admin_password').value.trim();
+  const adminUser = state.users.find(u => u.email === email && u.isAdmin);
+
+  if(!adminUser || adminUser.password !== password){
+    return alert('Invalid Admin credentials!');
+  }
+
+  state.currentUser = adminUser; // set admin session
+  lsSet('leaf_session', adminUser);
+  hideModals();
+  state.view.page='admin';
+  render();
+}
+
+
+
+function completeOrder(){
+  const user = state.currentUser;
+  if(!user) return alert('Please create profile first!');
+  if(!state.paymentMethod) return alert('Select a payment option first!');
+
+  const orderId='ORD'+Date.now();
+  const items=state.cart.map(i=>({...i,price:state.products.find(p=>p.id===i.id).price}));
+  const order={
+    id:orderId,
+    user:user.email||'guest@leafstone.test',
+    name:user.name,
+    email:user.email||'guest@leafstone.test',
+    mobile:user.mobile,
+    addr:user.addr,
+    items,
+    status:'Processing',
+    deliveryDate:'',
+    paymentMethod:state.paymentMethod,
+    date:new Date().toISOString()
+  };
+
+  state.orders.push(order);
+  state.cart=[];
+  state.paymentMethod=''; // reset
+  saveAll();
+
+  showModal('Order Placed', `<p>Thanks ${user.name}! Your order <strong>${orderId}</strong> is placed. Admin will confirm delivery date and notify you via WhatsApp.</p>`);
+}
+
+// --- Admin ---
+function renderAdmin() {
+  const orders = state.orders;
+
+  const adminPanel = el('div', { class: 'card' }, [
+    el('span', { class:'closeX', onclick:()=>{state.view.page='home'; render();} }, '×'),
+    el('h2', {}, 'Admin Panel - Orders'),
+    
+    ...orders.map(o => el('div', { class:'card', style:'margin-bottom:12px;padding:12px' }, [
+      
+      // Customer info
+      el('div', { 
+  html: `<strong>${o.name}</strong>  ${o.mobile} • Status: ${o.status} • Payment: ${o.paymentStatus || 'Unpaid'}` 
+}),
+
+      
+      // Items
+      el('div', {}, [
+        el('div', { html:'<strong>Items:</strong>' }),
+        el('ul', {}, o.items.map(i => {
+          const p = state.products.find(p => p.id === i.id);
+          const title = p ? p.title : i.id;
+          return el('li', {}, `${title} x ${i.qty} • ₹${i.price.toFixed(2)}`);
+        }))
+      ]),
+
+      // Action buttons
+      el('div', { class:'flex', style:'gap:8px;align-items:center;margin-top:8px' }, [
+        // Delivery date selector
+        el('input', {
+          type:'date',
+          value:o.deliveryDate,
+          onchange:(e)=>{ o.deliveryDate=e.target.value; saveAll(); }
+        }),
+        // Confirm & Notify
+        el('button', { onclick: ()=>{
+          if(o.paymentStatus==='Unpaid') return alert('Payment not completed! Mark as Paid first.');
+          if(!o.deliveryDate) return alert('Select delivery date first!');
+          o.status='Confirmed';
+          saveAll();
+          const msg=`Hello ${o.name}, your order ${o.id} is confirmed and will be delivered on ${o.deliveryDate}.`;
+          const wa=`https://api.whatsapp.com/send?phone=${o.mobile}&text=${encodeURIComponent(msg)}`;
+          if(confirm('Send this via WhatsApp?')) window.open(wa,'_blank');
+          renderAdmin();
+        }, style:'padding:6px;background:#0f766e;color:white;border:none;border-radius:6px;cursor:pointer;'}, 'Confirm & Notify'),
+        // Mark Payment Paid
+        el('button', { onclick: ()=>{
+          o.paymentStatus='Paid';
+          saveAll();
+          showToast(`Payment marked as Paid for ${o.id}`);
+          renderAdmin();
+        }, style:'padding:6px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;'}, 'Mark Payment Paid'),
+        // Delete Order
+        el('button', { onclick: ()=>{
+          if(confirm(`Delete order ${o.id}?`)){
+            state.orders = state.orders.filter(ord => ord.id !== o.id);
+            saveAll();
+            renderAdmin();
+          }
+        }, style:'padding:6px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;'}, 'Delete Order')
+      ])
+    ]))
+  ]);
+
+  app.innerHTML=''; 
+  app.appendChild(adminPanel);
+}
+
+
+// --- Modals & Toast ---
+function showModal(title,html){modals.innerHTML=''; modals.appendChild(el('div',{class:'modal'},el('div',{class:'card'},[el('span',{class:'closeX',onclick:hideModals},'×'), el('h3',{},title),el('div',{html}),el('div',{},el('button',{onclick:hideModals},'Close'))])))}
+function hideModals(){modals.innerHTML=''}
+function showToast(msg){const t=el('div',{style:'position:fixed;right:20px;bottom:20px;padding:10px 12px;background:#0f766e;color:white;border-radius:8px'},msg); document.body.appendChild(t); setTimeout(()=>t.remove(),2000)}
+
+// --- Header buttons ---
+//document.getElementById('btnAdmin').addEventListener('click',()=>{renderAdminLogin();});
+document.getElementById('btnAdmin').addEventListener('click',()=>{
+  renderAdminLogin(); // show login modal first
+});
+
+
+document.getElementById('btnCart').addEventListener('click',()=>{state.view.page='cart'; render();});
+document.getElementById('btnProfile').addEventListener('click',()=>{state.view.page='profile'; render();});
+document.getElementById('btnAdmin').addEventListener('click',()=>{state.view.page='admin'; render();});
+document.getElementById('btnCategories').addEventListener('click',()=>{showCategories();});
+
+// --- Categories ---
+function showCategories(){const cats=[...new Set(state.products.map(p=>p.category))]; const m=el('div',{class:'modal'},el('div',{class:'card'},[el('span',{class:'closeX',onclick:hideModals},'×'),el('h3',{},'Categories'),el('div',{},cats.map(c=>el('div',{class:'small',onclick:()=>{state.view.page='products'; state.view.params={category:c}; hideModals(); render();}},c)))])); modals.innerHTML=''; modals.appendChild(m);}
+
+// --- Products list ---
+function renderProducts(){
+  const params=state.view.params||{}; const q=(params.q||'').toLowerCase();
+  let filtered=state.products.filter(p=>{
+    if(params.category&&p.category!==params.category) return false;
+    if(q&&!(p.title.toLowerCase().includes(q)||p.category.toLowerCase().includes(q)||p.desc.toLowerCase().includes(q))) return false;
+    return true;
+  });
+  const grid=el('div',{class:'grid product-grid'},filtered.map(p=>productCard(p)));
+  const controls=el('div',{class:'card grid',style:'grid-template-columns:1fr 220px;align-items:center;'},[
+    el('h2',{},params.category?params.category+' Products':'All Products'),
+    el('button',{class:'btn-ghost',onclick:()=>{state.view.page='home'; render();}},'Back')
+  ]);
+  app.innerHTML=''; app.appendChild(controls); app.appendChild(grid);
+}
+
+// --- Init ---
+render();
+</script>
+</body>
+</html>
